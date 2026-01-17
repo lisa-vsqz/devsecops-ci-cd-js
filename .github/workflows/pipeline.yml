@@ -1,0 +1,60 @@
+name: DevSecOps CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  ci-cd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Dependency vulnerability scan
+        run: npm audit --audit-level=high || true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v3
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Docker image
+        run: docker build -t ghcr.io/${{ github.repository }}/js-api:latest .
+
+      - name: Push Docker image
+        run: docker push ghcr.io/${{ github.repository }}/js-api:latest
+
+      - name: Container security scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/js-api:latest
+          severity: CRITICAL
+          exit-code: 1
+
+      - name: Create Kubernetes cluster
+        uses: helm/kind-action@v1
+
+      - name: Deploy to Kubernetes
+        run: kubectl apply -f deployment.yaml
+
+      - name: Verify deployment
+        run: kubectl get pods

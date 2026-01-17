@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: js-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: js-api
+  template:
+    metadata:
+      labels:
+        app: js-api
+    spec:
+      containers:
+        - name: js-api
+          image: ghcr.io/USUARIO/devsecops-ci-cd-js:latest
+          ports:
+            - containerPort: 3000
