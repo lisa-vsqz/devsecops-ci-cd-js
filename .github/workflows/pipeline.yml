@@ -2,9 +2,12 @@ name: DevSecOps CI/CD Pipeline
 
 on:
   push:
-    branches:
+    branches: 
       - "main"
       - "vulnerable-code"
+  pull_request:
+    branches:
+      - "main"
 
 permissions:
   contents: read
@@ -14,7 +17,7 @@ permissions:
 jobs:
   ci-cd:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,21 +33,22 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-      # MEJORA 1: npm audit SIN || true para que falle si hay vulnerabilidades
-      - name: Dependency vulnerability scan
+      # Escaneo de vulnerabilidades en dependencias
+      - name: Dependency vulnerability scan (npm audit)
         run: npm audit --audit-level=moderate
-        continue-on-error: true # Para que el pipeline siga pero registre el error
+        continue-on-error: true
 
+      # Análisis estático de código con CodeQL
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
-          # MEJORA 2: Agregar queries adicionales para detectar más problemas
           queries: +security-extended,security-and-quality
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
 
+      # Build y push de imagen Docker
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -54,30 +58,32 @@ jobs:
       - name: Push Docker image
         run: docker push ghcr.io/${{ github.repository }}/js-api:latest
 
-      # MEJORA 3: Trivy con severidades más bajas para detectar más problemas
-      - name: Container security scan (Trivy)
+      # Escaneo de seguridad del contenedor
+      - name: Container vulnerability scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ghcr.io/${{ github.repository }}/js-api:latest
-          severity: MEDIUM,HIGH,CRITICAL # Detectar más niveles
-          exit-code: 0 # No fallar, solo reportar
           format: table
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: 0
+        continue-on-error: true
 
-      # MEJORA 4: Escaneo adicional de secretos
-      - name: Secret scanning (Trivy)
+      # Escaneo de secretos en la imagen
+      - name: Secret scanning in container (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ghcr.io/${{ github.repository }}/js-api:latest
-          scan-type: config
+          format: table
+          scanners: secret
           exit-code: 0
+        continue-on-error: true
 
-      - name: Create Kubernetes cluster
-        uses: helm/kind-action@v1
-
-      - name: Deploy to Kubernetes
-        run: kubectl apply -f deployment.yaml
-
-      - name: Verify deployment
-        run: |
-          kubectl get pods
-          kubectl get services
+      # Escaneo del Dockerfile
+      - name: Dockerfile security scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: './Dockerfile'
+          format: table
+          exit-code: 0
+        continue-
