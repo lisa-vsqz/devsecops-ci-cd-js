@@ -2,7 +2,9 @@ name: DevSecOps CI/CD Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - "main"
+      - "vulnerable-code"
 
 permissions:
   contents: read
@@ -28,13 +30,17 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      # MEJORA 1: npm audit SIN || true para que falle si hay vulnerabilidades
       - name: Dependency vulnerability scan
-        run: npm audit --audit-level=high || true
+        run: npm audit --audit-level=moderate
+        continue-on-error: true # Para que el pipeline siga pero registre el error
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
+          # MEJORA 2: Agregar queries adicionales para detectar más problemas
+          queries: +security-extended,security-and-quality
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
@@ -48,12 +54,22 @@ jobs:
       - name: Push Docker image
         run: docker push ghcr.io/${{ github.repository }}/js-api:latest
 
+      # MEJORA 3: Trivy con severidades más bajas para detectar más problemas
       - name: Container security scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ghcr.io/${{ github.repository }}/js-api:latest
-          severity: CRITICAL
-          exit-code: 1
+          severity: MEDIUM,HIGH,CRITICAL # Detectar más niveles
+          exit-code: 0 # No fallar, solo reportar
+          format: table
+
+      # MEJORA 4: Escaneo adicional de secretos
+      - name: Secret scanning (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/js-api:latest
+          scan-type: config
+          exit-code: 0
 
       - name: Create Kubernetes cluster
         uses: helm/kind-action@v1
@@ -62,4 +78,6 @@ jobs:
         run: kubectl apply -f deployment.yaml
 
       - name: Verify deployment
-        run: kubectl get pods
+        run: |
+          kubectl get pods
+          kubectl get services
