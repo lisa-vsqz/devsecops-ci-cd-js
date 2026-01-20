@@ -2,7 +2,7 @@ name: DevSecOps CI/CD Pipeline
 
 on:
   push:
-    branches: 
+    branches:
       - "main"
       - "vulnerable-code"
   pull_request:
@@ -17,7 +17,7 @@ permissions:
 jobs:
   ci-cd:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -83,7 +83,19 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: config
-          scan-ref: './Dockerfile'
+          scan-ref: "./Dockerfile"
           format: table
           exit-code: 0
-        continue-
+        continue-on-error: true
+
+      # Despliegue a Kubernetes
+      - name: Create Kubernetes cluster
+        uses: helm/kind-action@v1
+
+      - name: Deploy to Kubernetes
+        run: kubectl apply -f deployment.yaml
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods
+          kubectl get services
