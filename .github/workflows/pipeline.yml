@@ -104,7 +104,8 @@ jobs:
       # DAST - Nikto scan
       - name: Run Nikto DAST scan
         run: |
-          docker run --network="host" secfigo/nikto:latest \
+          mkdir -p ${{ github.workspace }}/nikto-results
+          docker run --network="host" -v ${{ github.workspace }}/nikto-results:/tmp secfigo/nikto:latest \
             -h http://localhost:3000 \
             -output /tmp/nikto-report.txt \
             -Format txt || true
@@ -115,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nikto-dast-results
-          path: /tmp/nikto-report.txt
+          path: ${{ github.workspace }}/nikto-results/nikto-report.txt
         continue-on-error: true
 
       # Despliegue a Kubernetes
