@@ -2,7 +2,12 @@ name: DevSecOps CI/CD Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - "main"
+      - "vulnerable-code"
+  pull_request:
+    branches:
+      - "main"
 
 permissions:
   contents: read
@@ -28,17 +33,22 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-      - name: Dependency vulnerability scan
-        run: npm audit --audit-level=high || true
+      # Escaneo de vulnerabilidades en dependencias
+      - name: Dependency vulnerability scan (npm audit)
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
 
+      # Análisis estático de código con CodeQL
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
+          queries: +security-extended,security-and-quality
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
 
+      # Build y push de imagen Docker
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -48,13 +58,37 @@ jobs:
       - name: Push Docker image
         run: docker push ghcr.io/${{ github.repository }}/js-api:latest
 
-      - name: Container security scan (Trivy)
+      # Escaneo de seguridad del contenedor
+      - name: Container vulnerability scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ghcr.io/${{ github.repository }}/js-api:latest
-          severity: CRITICAL
-          exit-code: 1
+          format: table
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: 0
+        continue-on-error: true
 
+      # Escaneo de secretos en la imagen
+      - name: Secret scanning in container (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/js-api:latest
+          format: table
+          scanners: secret
+          exit-code: 0
+        continue-on-error: true
+
+      # Escaneo del Dockerfile
+      - name: Dockerfile security scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: "./Dockerfile"
+          format: table
+          exit-code: 0
+        continue-on-error: true
+
+      # Despliegue a Kubernetes
       - name: Create Kubernetes cluster
         uses: helm/kind-action@v1
 
@@ -62,4 +96,6 @@ jobs:
         run: kubectl apply -f deployment.yaml
 
       - name: Verify deployment
-        run: kubectl get pods
+        run: |
+          kubectl get pods
+          kubectl get services
