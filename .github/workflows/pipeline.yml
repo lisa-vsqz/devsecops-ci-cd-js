@@ -104,20 +104,25 @@ jobs:
       # DAST - Nikto scan
       - name: Run Nikto DAST scan
         run: |
-          mkdir -p ${{ github.workspace }}/nikto-results
-          docker run --network="host" -v ${{ github.workspace }}/nikto-results:/tmp secfigo/nikto:latest \
+          docker run --rm --network host -v /tmp/app-logs:/tmp/app-logs ghcr.io/sullo/nikto \
             -h http://localhost:3000 \
-            -output /tmp/nikto-report.txt \
-            -Format txt || true
+            -output /tmp/app-logs/nikto-report.html || true
+          echo "Nikto scan completed"
         continue-on-error: true
+
+      # DAST - Show app logs
+      - name: Show app logs
+        if: always()
+        run: cat /tmp/app-logs/app.log 2>/dev/null || echo "No app log found"
 
       # DAST - Upload Nikto results
       - name: Upload Nikto scan results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nikto-dast-results
-          path: ${{ github.workspace }}/nikto-results/nikto-report.txt
-        continue-on-error: true
+          path: /tmp/app-logs/
+          if-no-files-found: ignore
 
       # Despliegue a Kubernetes
       - name: Create Kubernetes cluster
