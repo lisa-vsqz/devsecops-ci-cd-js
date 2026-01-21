@@ -88,6 +88,36 @@ jobs:
           exit-code: 0
         continue-on-error: true
 
+      # DAST - Instalar dependencias
+      - name: Install dependencies for DAST
+        run: npm install
+
+      # DAST - Levantar la aplicación
+      - name: Start vulnerable app
+        run: |
+          mkdir -p /tmp/app-logs
+          nohup node src/index.js > /tmp/app-logs/app.log 2>&1 &
+          sleep 5
+          echo "Checking application status..."
+          curl -s http://localhost:3000 || echo "App not responding"
+
+      # DAST - Nikto scan
+      - name: Run Nikto DAST scan
+        run: |
+          docker run --network="host" secfigo/nikto:latest \
+            -h http://localhost:3000 \
+            -output /tmp/nikto-report.txt \
+            -Format txt || true
+        continue-on-error: true
+
+      # DAST - Upload Nikto results
+      - name: Upload Nikto scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikto-dast-results
+          path: /tmp/nikto-report.txt
+        continue-on-error: true
+
       # Despliegue a Kubernetes
       - name: Create Kubernetes cluster
         uses: helm/kind-action@v1
