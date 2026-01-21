@@ -2,7 +2,12 @@ name: DevSecOps CI/CD Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - "main"
+      - "vulnerable-code"
+  pull_request:
+    branches:
+      - "main"
 
 permissions:
   contents: read
@@ -28,17 +33,22 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-      - name: Dependency vulnerability scan
-        run: npm audit --audit-level=high || true
+      # Escaneo de vulnerabilidades en dependencias
+      - name: Dependency vulnerability scan (npm audit)
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
 
+      # Análisis estático de código con CodeQL
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
+          queries: +security-extended,security-and-quality
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v3
 
+      # Build y push de imagen Docker
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -48,13 +58,73 @@ jobs:
       - name: Push Docker image
         run: docker push ghcr.io/${{ github.repository }}/js-api:latest
 
-      - name: Container security scan (Trivy)
+      # Escaneo de seguridad del contenedor
+      - name: Container vulnerability scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ghcr.io/${{ github.repository }}/js-api:latest
-          severity: CRITICAL
-          exit-code: 1
+          format: table
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: 0
+        continue-on-error: true
 
+      # Escaneo de secretos en la imagen
+      - name: Secret scanning in container (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/js-api:latest
+          format: table
+          scanners: secret
+          exit-code: 0
+        continue-on-error: true
+
+      # Escaneo del Dockerfile
+      - name: Dockerfile security scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: "./Dockerfile"
+          format: table
+          exit-code: 0
+        continue-on-error: true
+
+      # DAST - Instalar dependencias
+      - name: Install dependencies for DAST
+        run: npm install
+
+      # DAST - Levantar la aplicación
+      - name: Start vulnerable app
+        run: |
+          mkdir -p /tmp/app-logs
+          nohup node src/index.js > /tmp/app-logs/app.log 2>&1 &
+          sleep 5
+          echo "Checking application status..."
+          curl -s http://localhost:3000 || echo "App not responding"
+
+      # DAST - Nikto scan
+      - name: Run Nikto DAST scan
+        run: |
+          docker run --rm --network host -v /tmp/app-logs:/tmp/app-logs ghcr.io/sullo/nikto \
+            -h http://localhost:3000 \
+            -output /tmp/app-logs/nikto-report.html || true
+          echo "Nikto scan completed"
+        continue-on-error: true
+
+      # DAST - Show app logs
+      - name: Show app logs
+        if: always()
+        run: cat /tmp/app-logs/app.log 2>/dev/null || echo "No app log found"
+
+      # DAST - Upload Nikto results
+      - name: Upload Nikto scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikto-dast-results
+          path: /tmp/app-logs/
+          if-no-files-found: ignore
+
+      # Despliegue a Kubernetes
       - name: Create Kubernetes cluster
         uses: helm/kind-action@v1
 
@@ -62,4 +132,6 @@ jobs:
         run: kubectl apply -f deployment.yaml
 
       - name: Verify deployment
-        run: kubectl get pods
+        run: |
+          kubectl get pods
+          kubectl get services

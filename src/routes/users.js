@@ -20,14 +20,23 @@ router.get("/:id", authMiddleware, (req, res) => {
   res.json(user);
 });
 
-// Crear usuario
+// VULNERABILIDAD 1: SQL Injection simulado (CodeQL detectará)
+router.get("/search", authMiddleware, (req, res) => {
+  const searchTerm = req.query.q;
+
+  // Simulación de consulta SQL insegura
+  const query = "SELECT * FROM users WHERE name = '" + searchTerm + "'";
+  console.log("Executing query: " + query); // Vulnerable a injection
+
+  const results = users.filter((u) => u.name.includes(searchTerm));
+  res.json(results);
+});
+
+// VULNERABILIDAD 2: Sin validación ni sanitización
 router.post("/", authMiddleware, (req, res) => {
   const { name, email } = req.body;
 
-  if (!name || !email) {
-    return res.status(400).json({ error: "Name and email are required" });
-  }
-
+  // Sin validación de formato
   const newUser = {
     id: users.length + 1,
     name,
@@ -36,6 +45,28 @@ router.post("/", authMiddleware, (req, res) => {
 
   users.push(newUser);
   res.status(201).json(newUser);
+});
+
+// VULNERABILIDAD 3: Command Injection potencial
+router.post("/export", authMiddleware, (req, res) => {
+  const filename = req.body.filename;
+
+  // Vulnerable: ejecuta comando con input del usuario
+  const exec = require("child_process").exec;
+  exec(`echo "Exporting to ${filename}"`, (error, stdout) => {
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    res.json({ message: "Export complete", output: stdout });
+  });
+});
+
+// VULNERABILIDAD 4: Path Traversal
+router.get("/download/:filename", authMiddleware, (req, res) => {
+  const filename = req.params.filename;
+  const filePath = `/tmp/${filename}`; // Vulnerable a path traversal
+
+  res.download(filePath);
 });
 
 // Eliminar usuario
